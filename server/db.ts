@@ -1275,9 +1275,11 @@ export function seedIfEmpty() {
     VALUES (?, ?, ?, ?, ?, 1, 1)
   `).run(
     'wh-1',
-    'Server-Side GTM / CAPI Relay (Demo)',
-    'https://httpbin.org/post',
-    'whsec_shuddho_9f8a7b6c5d4e3f2a1b',
+    // CONVERSION_WEBHOOK_URL (set on Vercel) replaces the demo receiver so every
+    // instance sends conversions to the real server-side GTM endpoint.
+    process.env.CONVERSION_WEBHOOK_URL ? 'Server-Side GTM (Stape)' : 'Server-Side GTM / CAPI Relay (Demo)',
+    (process.env.CONVERSION_WEBHOOK_URL || '').trim() || 'https://httpbin.org/post',
+    (process.env.CONVERSION_WEBHOOK_SECRET || '').trim() || 'whsec_shuddho_9f8a7b6c5d4e3f2a1b',
     JSON.stringify(['Purchase', 'OrderDelivered', 'OrderCancelled']),
   );
 
