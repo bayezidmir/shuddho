@@ -1,15 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Calendar, Download, RotateCcw } from 'lucide-react';
 import { formatBDT } from '../../lib/bd-validation';
 
 export const AdminReports: React.FC = () => {
   const [data, setData] = useState<any | null>(null);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
-  useEffect(() => {
-    fetch('/api/admin/reports')
+  const loadReports = useCallback((f?: string, t?: string) => {
+    const params = new URLSearchParams();
+    if (f) params.set('from', f);
+    if (t) params.set('to', t);
+    const qs = params.toString();
+    fetch(`/api/admin/reports${qs ? `?${qs}` : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setData);
   }, []);
+
+  useEffect(() => {
+    loadReports();
+  }, [loadReports]);
 
   if (!data) return <div className="h-64 bg-white rounded-xl animate-pulse" />;
 
@@ -28,11 +38,52 @@ export const AdminReports: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-[#1D2327]">Financial, Courier & Staff Reports</h1>
-        <button type="button" onClick={exportCsv} className="px-3.5 py-2 rounded-lg bg-[#0E5E6F] text-white text-xs font-bold inline-flex items-center gap-1.5">
-          <Download className="w-3.5 h-3.5" /> Export Product Profit CSV
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-[#1D2327]">Financial, Courier &amp; Staff Reports</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 text-xs text-[#646970]">
+            <Calendar className="w-3.5 h-3.5 text-[#0E5E6F]" />
+            <input
+              type="date"
+              aria-label="Report start date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg border border-[#DCDCDE] bg-white text-xs text-[#1D2327] tabular-nums"
+            />
+            <span>to</span>
+            <input
+              type="date"
+              aria-label="Report end date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg border border-[#DCDCDE] bg-white text-xs text-[#1D2327] tabular-nums"
+            />
+            <button
+              type="button"
+              onClick={() => loadReports(fromDate, toDate)}
+              className="px-3 py-1.5 rounded-lg bg-white border border-[#DCDCDE] text-xs font-semibold text-[#1D2327] hover:bg-[#F6F7F7]"
+            >
+              Filter
+            </button>
+            {(fromDate || toDate) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFromDate('');
+                  setToDate('');
+                  loadReports('', '');
+                }}
+                aria-label="Reset report dates"
+                className="p-1.5 rounded-lg border border-[#DCDCDE] bg-white text-[#646970] hover:text-[#1D2327]"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <button type="button" onClick={exportCsv} className="px-3.5 py-2 rounded-lg bg-[#0E5E6F] text-white text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Download className="w-3.5 h-3.5" /> Export Product Profit CSV
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-xs">

