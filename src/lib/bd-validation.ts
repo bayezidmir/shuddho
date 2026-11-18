@@ -72,5 +72,5 @@ export function countSmsParts(text: string): { encoding: 'GSM-7' | 'Unicode'; ch
 }
 
 export function validateGtmContainerId(id: string): boolean {
-  return /^GTM-[A-Z0-9]{5,10}$/i.test(id.trim());
+  return /^GTM-[A-Z0-9]{4,12}$/i.test(id.trim());
 }

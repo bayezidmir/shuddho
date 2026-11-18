@@ -45,12 +45,24 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,webp,woff,woff2}'],
-          navigateFallbackDenylist: [/^\/api\//, /^\/admin/],
+          globPatterns: ['**/*.{js,css,ico,png,svg,jpg,webp,woff,woff2}'],
+          navigateFallback: null,
+          runtimeCaching: [
+            {
+              urlPattern: ({ request, url }) =>
+                request.mode === 'navigate' &&
+                !url.pathname.startsWith('/api/') &&
+                !url.pathname.startsWith('/admin'),
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'storefront-html',
+                networkTimeoutSeconds: 3,
+              },
+            },
+          ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
       {

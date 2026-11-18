@@ -9,6 +9,14 @@ import {
   trackPageView,
   type GA4Item,
 } from '../lib/datalayer';
+import {
+  computeTrackingSignature,
+  buildGtmInitScriptBody,
+  normalizeHeadOverrideHtml,
+  normalizeBodyOverrideHtml,
+  isValidGtmId,
+  normalizeGtmId,
+} from '../lib/gtm-injection';
 
 interface StoreContextValue {
   bootstrap: StoreBootstrap | null;
@@ -174,7 +182,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const tr = bootstrap.tracking;
     window.dataLayer = window.dataLayer || [];
 
-    // Google Consent Mode v2 defaults
+    // Google Consent Mode v2 defaults (skip if already injected by SSR)
     if (!document.getElementById('shuddho-consent-default')) {
       const cs = document.createElement('script');
       cs.id = 'shuddho-consent-default';
@@ -191,32 +199,73 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       document.head.prepend(cs);
     }
 
-    // Remove previous dynamic GTM snippets before re-injecting on instant Admin save
-    document.getElementById('shuddho-gtm-head')?.remove();
-    document.getElementById('shuddho-gtm-noscript')?.remove();
+    const expectedSig = computeTrackingSignature(tr);
+    const existingHeadNode = document.getElementById('shuddho-gtm-head');
+    const existingSig = existingHeadNode?.getAttribute('data-gtm-sig');
 
-    if (tr.gtmEnabled && (tr.overrideHeadCode || tr.gtmContainerId)) {
-      const headScript = document.createElement('script');
-      headScript.id = 'shuddho-gtm-head';
-      if (tr.overrideHeadCode?.trim()) {
-        headScript.textContent = tr.overrideHeadCode
-          .replace(/<\/?script[^>]*>/gi, '')
-          .trim();
-      } else {
-        const cid = tr.gtmContainerId.trim();
-        headScript.textContent = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${cid}');`;
-      }
-      document.head.prepend(headScript);
+    if (existingSig !== expectedSig) {
+      // Remove previous dynamic/SSR GTM snippets before re-injecting on live setting updates
+      document.getElementById('shuddho-gtm-head')?.remove();
+      document.getElementById('shuddho-gtm-start')?.remove();
+      document.querySelectorAll('[data-shuddho-override="head"]').forEach((el) => el.remove());
+      document.getElementById('shuddho-gtm-noscript')?.remove();
 
-      const noscript = document.createElement('noscript');
-      noscript.id = 'shuddho-gtm-noscript';
-      if (tr.overrideBodyCode?.trim()) {
-        noscript.innerHTML = tr.overrideBodyCode.replace(/<\/?noscript[^>]*>/gi, '');
-      } else {
-        const cid = tr.gtmContainerId.trim();
-        noscript.innerHTML = `<iframe src="https://www.googletagmanager.com/ns.html?id=${cid}" height="0" width="0" style="display:none;visibility:hidden"></iframe>`;
+      const cid = normalizeGtmId(tr.gtmContainerId);
+      const overrideHead = String(tr.overrideHeadCode || '').trim();
+      const shouldInject = Boolean(tr.gtmEnabled) && (Boolean(overrideHead) || isValidGtmId(cid));
+
+      if (shouldInject) {
+        if (overrideHead) {
+          const marker = document.createElement('meta');
+          marker.id = 'shuddho-gtm-head';
+          marker.setAttribute('name', 'shuddho-gtm');
+          marker.setAttribute('content', 'client');
+          marker.setAttribute('data-gtm-sig', expectedSig);
+          document.head.prepend(marker);
+
+          const tpl = document.createElement('template');
+          tpl.innerHTML = normalizeHeadOverrideHtml(overrideHead);
+          const nodes = Array.from(tpl.content.childNodes);
+          for (const node of nodes) {
+            if (node instanceof HTMLScriptElement) {
+              const s = document.createElement('script');
+              for (const attr of Array.from(node.attributes)) {
+                s.setAttribute(attr.name, attr.value);
+              }
+              if (node.textContent) s.textContent = node.textContent;
+              s.setAttribute('data-shuddho-override', 'head');
+              document.head.appendChild(s);
+            } else if (node instanceof Element) {
+              node.setAttribute('data-shuddho-override', 'head');
+              document.head.appendChild(node);
+            }
+          }
+        } else {
+          const initScript = document.createElement('script');
+          initScript.id = 'shuddho-gtm-start';
+          initScript.textContent = buildGtmInitScriptBody();
+          document.head.prepend(initScript);
+
+          const headScript = document.createElement('script');
+          headScript.id = 'shuddho-gtm-head';
+          headScript.async = true;
+          headScript.src = `https://www.googletagmanager.com/gtm.js?id=${cid}`;
+          headScript.setAttribute('data-gtm-sig', expectedSig);
+          document.head.prepend(headScript);
+        }
+
+        const overrideBody = String(tr.overrideBodyCode || '').trim();
+        if (overrideBody || isValidGtmId(cid)) {
+          const noscript = document.createElement('noscript');
+          noscript.id = 'shuddho-gtm-noscript';
+          if (overrideBody) {
+            noscript.innerHTML = normalizeBodyOverrideHtml(overrideBody).replace(/<\/?noscript[^>]*>/gi, '');
+          } else {
+            noscript.innerHTML = `<iframe src="https://www.googletagmanager.com/ns.html?id=${cid}" height="0" width="0" style="display:none;visibility:hidden"></iframe>`;
+          }
+          document.body.prepend(noscript);
+        }
       }
-      document.body.prepend(noscript);
     }
 
     // Custom CSS injection from Appearance

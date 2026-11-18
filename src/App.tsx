@@ -31,6 +31,7 @@ import { AdminReports } from './pages/admin/AdminReports';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminNotifications } from './pages/admin/AdminNotifications';
 import { AdminSettings } from './pages/admin/AdminSettings';
+import { installAdminFetchInterceptor } from './lib/admin-auth';
 
 const AdminRouter: React.FC = () => {
   const [staff, setStaff] = useState<StaffUser | null>(null);
@@ -39,6 +40,9 @@ const AdminRouter: React.FC = () => {
   const [badges, setBadges] = useState<{ pendingOrders?: number; incompleteOrders?: number }>({});
 
   useEffect(() => {
+    installAdminFetchInterceptor(() => {
+      setStaff(null);
+    });
     fetch('/api/admin/auth/me')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {

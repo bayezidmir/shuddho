@@ -48,6 +48,7 @@ import {
   computeDashboardAnalytics,
   isTimestampInRange,
 } from './src/lib/dashboard-analytics';
+import { injectTrackingIntoDocument, normalizeGtmId } from './src/lib/gtm-injection';
 
 initSchema();
 seedIfEmpty();
@@ -883,9 +884,11 @@ export async function buildApp() {
     }
 
     const token = createStaffSession(user.id, ip, String(req.headers['user-agent'] || ''));
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
     res.cookie('shuddho_staff_token', token, {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: isHttps ? 'none' : 'lax',
+      secure: isHttps,
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/',
     });
@@ -900,7 +903,12 @@ export async function buildApp() {
   app.post('/api/admin/auth/logout', (req, res) => {
     const token = extractBearerOrCookieToken(req);
     if (token) db.prepare('DELETE FROM staff_sessions WHERE token = ?').run(token);
-    res.clearCookie('shuddho_staff_token', { path: '/' });
+    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.clearCookie('shuddho_staff_token', {
+      path: '/',
+      sameSite: isHttps ? 'none' : 'lax',
+      secure: isHttps,
+    });
     res.json({ ok: true });
   });
 
@@ -1991,15 +1999,18 @@ export async function buildApp() {
         res.status(403).json({ error: 'Tracking & GTM settings require Owner or Marketing role.' });
         return;
       }
-      const val = req.body?.value || {};
-      if (val.gtmEnabled && val.gtmContainerId && !validateGtmContainerId(val.gtmContainerId)) {
+      const val = { ...(req.body?.value || {}) };
+      val.gtmContainerId = normalizeGtmId(val.gtmContainerId);
+      const hasOverride = Boolean(String(val.overrideHeadCode || '').trim() || String(val.overrideBodyCode || '').trim());
+      if (val.gtmContainerId && !validateGtmContainerId(val.gtmContainerId)) {
         res.status(400).json({ error: 'GTM Container ID must match GTM-XXXXXXX format.' });
         return;
       }
-      if ((val.overrideHeadCode || val.overrideBodyCode) && req.staff!.role !== 'owner') {
+      if (hasOverride && req.staff!.role !== 'owner') {
         res.status(403).json({ error: 'Custom GTM head/body code overrides are Owner-only.' });
         return;
       }
+      req.body.value = val;
     } else if (req.staff!.role !== 'owner' && req.staff!.role !== 'manager') {
       res.status(403).json({ error: `Permission denied: role '${req.staff!.role}' cannot modify settings.` });
       return;
@@ -2262,20 +2273,44 @@ async function startServer() {
     processRetryQueue().catch(() => {});
   }, 60_000);
 
-  // Vite middleware in development, static dist in production
+  // Ensure unknown /api/* paths never return HTML
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+  });
+
+  // Vite middleware in development, static dist in production (with SSR GTM/tracking injection)
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: 'spa',
+      appType: 'custom',
     });
     app.use(vite.middlewares);
+    app.get('*', async (req, res, next) => {
+      try {
+        const template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        let html = await vite.transformIndexHtml(req.originalUrl, template);
+        if (!req.originalUrl.startsWith('/admin')) {
+          const tracking = getSetting<Record<string, any>>('tracking', {});
+          html = injectTrackingIntoDocument(html, tracking);
+        }
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (err) {
+        vite.ssrFixStacktrace(err as Error);
+        next(err);
+      }
+    });
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.use(express.static(distPath, { index: false }));
+    app.get('*', (req, res) => {
+      let html = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
+      if (!req.originalUrl.startsWith('/admin')) {
+        const tracking = getSetting<Record<string, any>>('tracking', {});
+        html = injectTrackingIntoDocument(html, tracking);
+      }
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
     });
   }
 
