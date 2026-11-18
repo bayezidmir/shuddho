@@ -25,6 +25,7 @@ export const AdminSettings: React.FC = () => {
   const [payloadModal, setPayloadModal] = useState<any | null>(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [errMsg, setErrMsg] = useState('');
+  const [verifyStatus, setVerifyStatus] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const loadSettings = async () => {
     const [g, t, p, w, s] = await Promise.all([
@@ -54,14 +55,26 @@ export const AdminSettings: React.FC = () => {
 
   const saveSettingKey = async (key: string, value: any) => {
     setErrMsg('');
-    if (key === 'tracking' && value.gtmEnabled && value.gtmContainerId && !validateGtmContainerId(value.gtmContainerId)) {
-      setErrMsg('GTM Container ID must match format GTM-XXXXXXX (e.g., GTM-ABC1234).');
-      return;
+    setVerifyStatus(null);
+    let payloadValue = value;
+    if (key === 'tracking') {
+      const cleanedId = String(value.gtmContainerId || '').trim().toUpperCase();
+      const hasOverride = Boolean(String(value.overrideHeadCode || '').trim() || String(value.overrideBodyCode || '').trim());
+      if (cleanedId && !validateGtmContainerId(cleanedId)) {
+        setErrMsg('GTM Container ID must match format GTM-XXXXXXX (e.g., GTM-ABC1234).');
+        return;
+      }
+      payloadValue = {
+        ...value,
+        gtmContainerId: cleanedId,
+        gtmEnabled: value.gtmEnabled !== undefined ? Boolean(value.gtmEnabled) : Boolean(cleanedId || hasOverride),
+      };
+      setTracking(payloadValue);
     }
     const r = await fetch(`/api/admin/settings/${key}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value }),
+      body: JSON.stringify({ value: payloadValue }),
     });
     const d = await r.json();
     if (!r.ok) {
@@ -70,6 +83,40 @@ export const AdminSettings: React.FC = () => {
     }
     await refreshBootstrap();
     notify(`Saved "${key}" settings and updated storefront immediately.`);
+  };
+
+  const verifyStorefrontGtm = async () => {
+    setVerifyStatus(null);
+    try {
+      const res = await fetch(`/?gtm_verify=${Date.now()}`, { cache: 'no-store' });
+      const html = await res.text();
+      const headEnd = html.indexOf('</head>');
+      const headSection = headEnd > 0 ? html.slice(0, headEnd) : html;
+      const cid = String(tracking.gtmContainerId || '').trim().toUpperCase();
+      const hasSsrMarker = headSection.includes('data-shuddho-gtm="ssr"');
+      const hasContainer = cid ? headSection.includes(cid) : false;
+      const hasOverride = Boolean(String(tracking.overrideHeadCode || '').trim()) && hasSsrMarker;
+      if (hasSsrMarker && (hasContainer || hasOverride)) {
+        setVerifyStatus({
+          ok: true,
+          msg: cid
+            ? `Verified: ${cid} is rendered directly inside storefront <head> and <body> HTML for Tag Assistant.`
+            : 'Verified: Custom Head Code override is rendered directly inside storefront <head> HTML.',
+        });
+      } else if (!tracking.gtmEnabled) {
+        setVerifyStatus({
+          ok: false,
+          msg: 'GTM is currently disabled. Check "Enable GTM" and click Save & Activate Tracking Live.',
+        });
+      } else {
+        setVerifyStatus({
+          ok: false,
+          msg: 'Storefront <head> HTML does not show active GTM tags yet. Save your GTM Container ID or Head Override first.',
+        });
+      }
+    } catch {
+      setVerifyStatus({ ok: false, msg: 'Could not fetch storefront HTML to verify.' });
+    }
   };
 
   const addWebhookEndpoint = async (e: React.FormEvent) => {
@@ -143,7 +190,7 @@ export const AdminSettings: React.FC = () => {
   };
 
   const gtmId = String(tracking.gtmContainerId || 'GTM-XXXXXXX').trim() || 'GTM-XXXXXXX';
-  const generatedHeadSnippet = `<!-- Google Tag Manager -->\n<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':\nnew Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],\nj=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=\n'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);\n})(window,document,'script','dataLayer','${gtmId}');</script>\n<!-- End Google Tag Manager -->`;
+  const generatedHeadSnippet = `<!-- Google Tag Manager -->\n<script async src="https://www.googletagmanager.com/gtm.js?id=${gtmId}"></script>\n<script>\n  window.dataLayer = window.dataLayer || [];\n  window.dataLayer.push({'gtm.start': new Date().getTime(), event: 'gtm.js'});\n  function gtag(){dataLayer.push(arguments);}\n  gtag('js', new Date());\n</script>\n<!-- End Google Tag Manager -->`;
 
   return (
     <div className="space-y-5">
@@ -235,7 +282,14 @@ export const AdminSettings: React.FC = () => {
                   type="text"
                   placeholder="GTM-ABC1234"
                   value={tracking.gtmContainerId || ''}
-                  onChange={(e) => setTracking({ ...tracking, gtmContainerId: e.target.value.toUpperCase() })}
+                  onChange={(e) => {
+                    const nextId = e.target.value.toUpperCase();
+                    setTracking({
+                      ...tracking,
+                      gtmContainerId: nextId,
+                      gtmEnabled: nextId.trim() ? true : tracking.gtmEnabled,
+                    });
+                  }}
                   className="w-full px-3 py-2 rounded-lg border font-mono uppercase"
                 />
               </div>
@@ -275,19 +329,52 @@ export const AdminSettings: React.FC = () => {
 
             <div className="space-y-2">
               <label className="block font-semibold">Custom Head Code Override (Owner-only)</label>
-              <textarea rows={2} value={tracking.overrideHeadCode || ''} onChange={(e) => setTracking({ ...tracking, overrideHeadCode: e.target.value })} placeholder="Leave blank to use auto-generated GTM snippet" className="w-full px-3 py-2 rounded-lg border font-mono text-[11px]" />
+              <textarea
+                rows={3}
+                value={tracking.overrideHeadCode || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setTracking({
+                    ...tracking,
+                    overrideHeadCode: val,
+                    gtmEnabled: val.trim() ? true : tracking.gtmEnabled,
+                  });
+                }}
+                placeholder="Paste full GTM <script>...</script> snippet or leave blank to use Container ID above"
+                className="w-full px-3 py-2 rounded-lg border font-mono text-[11px]"
+              />
               <label className="block font-semibold">Custom Body NoScript Override (Owner-only)</label>
-              <textarea rows={2} value={tracking.overrideBodyCode || ''} onChange={(e) => setTracking({ ...tracking, overrideBodyCode: e.target.value })} placeholder="Optional custom noscript tag" className="w-full px-3 py-2 rounded-lg border font-mono text-[11px]" />
+              <textarea
+                rows={2}
+                value={tracking.overrideBodyCode || ''}
+                onChange={(e) => setTracking({ ...tracking, overrideBodyCode: e.target.value })}
+                placeholder="Optional custom <noscript>...</noscript> tag"
+                className="w-full px-3 py-2 rounded-lg border font-mono text-[11px]"
+              />
             </div>
 
-            <button type="button" onClick={() => saveSettingKey('tracking', tracking)} className="px-4 py-2 rounded-lg bg-[#0E5E6F] text-white font-bold inline-flex items-center gap-1.5">
-              <Save className="w-3.5 h-3.5" /> Save & Activate Tracking Live
-            </button>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button type="button" onClick={() => saveSettingKey('tracking', tracking)} className="px-4 py-2 rounded-lg bg-[#0E5E6F] text-white font-bold inline-flex items-center gap-1.5">
+                <Save className="w-3.5 h-3.5" /> Save &amp; Activate Tracking Live
+              </button>
+              <button type="button" onClick={verifyStorefrontGtm} className="px-3.5 py-2 rounded-lg border border-[#DCDCDE] bg-white text-[#1D2327] font-semibold hover:bg-[#F6F7F7]">
+                Verify Storefront HTML
+              </button>
+              <span className={`text-xs font-semibold ${tracking.gtmEnabled ? 'text-[#1E9E6A]' : 'text-[#646970]'}`}>
+                {tracking.gtmEnabled ? 'Active on storefront' : 'Paused'}
+              </span>
+            </div>
+
+            {verifyStatus && (
+              <div className={`p-3 rounded-lg border text-xs font-semibold ${verifyStatus.ok ? 'bg-[#E6F7EF] border-[#B6E8D1] text-[#1E9E6A]' : 'bg-[#FFE3DF] border-[#F8B4AC] text-[#A3271B]'}`}>
+                {verifyStatus.msg}
+              </div>
+            )}
           </div>
 
           <div className="lg:col-span-5 bg-white rounded-xl border border-[#DCDCDE] p-5 space-y-3">
             <h2 className="font-bold text-sm">Auto-Generated GTM Code Preview</h2>
-            <p className="text-[#646970]">Read-only preview of what gets injected into storefront &lt;head&gt; &amp; &lt;body&gt;:</p>
+            <p className="text-[#646970]">Rendered server-side directly into storefront &lt;head&gt; &amp; &lt;body&gt; for Google Tag Assistant:</p>
             <pre className="p-3 rounded-lg bg-[#1D2327] text-emerald-300 text-[10px] font-mono overflow-x-auto whitespace-pre-wrap">{generatedHeadSnippet}</pre>
             <div className="p-3 rounded-lg bg-[#EEF5F5] border border-[#D3E3E5] space-y-1">
               <div className="font-bold text-[#0E5E6F]">Full GA4 DataLayer Ready</div>

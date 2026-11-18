@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../context/StoreContext';
 import { hasPermission, ROLE_LABELS, type Permission, type StaffRole } from '../../lib/rbac';
+import { setAdminToken, clearAdminToken } from '../../lib/admin-auth';
 
 export interface StaffUser {
   id: string;
@@ -117,6 +118,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
         setSubmitting(false);
         return;
       }
+      if (data.token) {
+        setAdminToken(data.token);
+      }
       onAuthChange(data.staff);
       // Ensure agent lands on orders or dashboard
       if (data.staff.role === 'packer') onSelectSection('orders');
@@ -130,6 +134,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   const handleLogout = async () => {
     await fetch('/api/admin/auth/logout', { method: 'POST' });
+    clearAdminToken();
     onAuthChange(null);
   };
 
