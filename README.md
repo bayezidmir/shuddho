@@ -34,3 +34,9 @@ A self-hosted bilingual (English + বাংলা) e-commerce storefront and Wo
 cp .env.example .env
 docker compose up -d --build
 ```
+
+## Deployment (Vercel)
+
+Deployed on Vercel from `main`. `npm run build` builds the Vite frontend into `dist/` and bundles the Express API (`server.ts`) into `server-dist/`, which `api/index.js` serves as a serverless function (see `vercel.json`).
+
+**Demo mode:** on Vercel the SQLite database and uploads live in `/tmp`, so orders, admin edits and uploads are wiped whenever the function restarts. For production, move data to a hosted database or run `npm start` on a server with persistent storage (see `docker-compose.yml`).
