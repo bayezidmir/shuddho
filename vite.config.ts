@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
+import {injectTrackingIntoDocument} from './src/lib/gtm-injection';
 
 export default defineConfig(() => {
   return {
@@ -65,6 +66,26 @@ export default defineConfig(() => {
           enabled: false,
         },
       }),
+      {
+        // Vercel: bake Google Tag Manager into the static HTML at build time.
+        // On Vercel, pages are served as static files (not through server.ts), and the
+        // demo SQLite settings are per-instance and reset on restart, so the GTM ID saved
+        // in Admin can't reliably reach visitors. Set GTM_CONTAINER_ID in the Vercel
+        // project's environment variables instead; it is injected here with the same
+        // markup server.ts would inject, so the storefront's client-side check keeps it.
+        name: 'vercel-build-gtm',
+        apply: 'build',
+        transformIndexHtml(html: string): string {
+          const gtmId = (process.env.GTM_CONTAINER_ID || '').trim();
+          if (!process.env.VERCEL || !gtmId) return html;
+          return injectTrackingIntoDocument(html, {
+            gtmEnabled: true,
+            gtmContainerId: gtmId,
+            consentDefaultAnalytics: 'granted',
+            consentDefaultAds: 'granted',
+          });
+        },
+      },
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',

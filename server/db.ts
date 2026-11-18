@@ -721,8 +721,9 @@ export function seedIfEmpty() {
   });
 
   setSetting('tracking', {
-    gtmEnabled: false,
-    gtmContainerId: '',
+    // GTM_CONTAINER_ID (set on Vercel) pre-fills the GTM setting so every instance agrees.
+    gtmEnabled: Boolean(process.env.GTM_CONTAINER_ID),
+    gtmContainerId: (process.env.GTM_CONTAINER_ID || '').trim().toUpperCase(),
     overrideHeadCode: '',
     overrideBodyCode: '',
     ga4Id: '',
