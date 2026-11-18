@@ -2262,6 +2262,11 @@ export async function buildApp() {
     res.json({ ok: true });
   });
 
+  // Ensure unknown /api/* paths never return HTML (also applies on Vercel)
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+  });
+
   return app;
 }
 
@@ -2272,11 +2277,6 @@ async function startServer() {
   setInterval(() => {
     processRetryQueue().catch(() => {});
   }, 60_000);
-
-  // Ensure unknown /api/* paths never return HTML
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ error: 'API route not found' });
-  });
 
   // Vite middleware in development, static dist in production (with SSR GTM/tracking injection)
   const isProd = process.env.NODE_ENV === 'production';
