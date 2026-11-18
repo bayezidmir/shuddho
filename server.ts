@@ -43,6 +43,11 @@ import { processPaymentSandboxOrLive } from './server/payments';
 import { normalizeBDPhone, validateGtmContainerId } from './src/lib/bd-validation';
 import { calculateCartTotals } from './src/lib/pricing';
 import { BD_DISTRICTS } from './src/lib/districts';
+import {
+  resolveDateRange,
+  computeDashboardAnalytics,
+  isTimestampInRange,
+} from './src/lib/dashboard-analytics';
 
 initSchema();
 seedIfEmpty();
@@ -930,63 +935,42 @@ export async function buildApp() {
   // =========================================================================
   // ADMIN DASHBOARD & ANALYTICS
   // =========================================================================
-  app.get('/api/admin/dashboard', requireStaff('dashboard.view'), (_req, res) => {
+  app.get('/api/admin/dashboard', requireStaff('dashboard.view'), (req, res) => {
     const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all() as Record<string, any>[];
-    const counts = getOrderCountsByStatus();
-    const incompleteCount = (db.prepare('SELECT COUNT(*) as c FROM incomplete_orders').get() as { c: number }).c;
+    const orderItems = db.prepare('SELECT * FROM order_items').all() as Record<string, any>[];
+    const incompleteOrders = db.prepare('SELECT * FROM incomplete_orders').all() as Record<string, any>[];
+    const customers = db.prepare('SELECT id, created_at FROM customers').all() as Record<string, any>[];
+
     const lowStockProducts = db.prepare(`SELECT id, name_en, sku, stock, low_stock_threshold FROM products WHERE stock <= low_stock_threshold`).all();
     const pendingReviews = db.prepare(`SELECT r.*, p.name_en as product_name FROM reviews r LEFT JOIN products p ON p.id = r.product_id WHERE r.status = 'pending'`).all();
     const failedWebhooks = db.prepare(`SELECT d.*, e.name as endpoint_name FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id WHERE d.status = 'failed' ORDER BY d.created_at DESC LIMIT 10`).all();
 
-    const validOrders = orders.filter((o) => !['cancelled', 'fake', 'failed_payment'].includes(o.status));
-    const totalSales = validOrders.reduce((s, o) => s + Number(o.total), 0);
-    const confirmedOrLater = orders.filter((o) => ['confirmed', 'processing', 'ready_to_ship', 'shipped', 'out_for_delivery', 'delivered', 'partially_delivered'].includes(o.status)).length;
-    const deliveredCount = counts.delivered || 0;
-    const returnedCount = counts.returned || 0;
-    const confirmationRate = orders.length ? Math.round((confirmedOrLater / orders.length) * 100) : 0;
-    const deliveryRate = confirmedOrLater ? Math.round((deliveredCount / Math.max(1, deliveredCount + returnedCount)) * 100) : 100;
-    const aov = validOrders.length ? Math.round(totalSales / validOrders.length) : 0;
+    const resolvedRange = resolveDateRange({
+      preset: typeof req.query.preset === 'string' ? req.query.preset : '7d',
+      from: typeof req.query.from === 'string' ? req.query.from : null,
+      to: typeof req.query.to === 'string' ? req.query.to : null,
+      granularity: typeof req.query.granularity === 'string' ? req.query.granularity : 'auto',
+    });
 
-    // Group by source
-    const sourceMap: Record<string, { source: string; orders: number; revenue: number }> = {};
-    for (const o of orders) {
-      let attr: Record<string, any> = {};
-      try { attr = JSON.parse(o.attribution || '{}'); } catch { attr = {}; }
-      const src = attr.utm_source || (attr.click_ids?.fbclid ? 'facebook' : attr.click_ids?.ttclid ? 'tiktok' : attr.click_ids?.gclid ? 'google' : 'direct');
-      if (!sourceMap[src]) sourceMap[src] = { source: src, orders: 0, revenue: 0 };
-      sourceMap[src].orders++;
-      sourceMap[src].revenue += Number(o.total);
-    }
+    const analytics = computeDashboardAnalytics({
+      orders,
+      orderItems,
+      incompleteOrders,
+      customers,
+      resolvedRange,
+    });
 
-    // Group by district
-    const districtMap: Record<string, { district: string; orders: number; revenue: number }> = {};
-    for (const o of orders) {
-      if (!districtMap[o.district]) districtMap[o.district] = { district: o.district, orders: 0, revenue: 0 };
-      districtMap[o.district].orders++;
-      districtMap[o.district].revenue += Number(o.total);
-    }
-
-    const pendingOrders = orders.filter((o) => o.status === 'pending').slice(0, 8);
+    const pendingIdSet = new Set(analytics.filteredPendingIds);
+    const pendingOrders = orders.filter((o) => pendingIdSet.has(o.id)).slice(0, 8);
+    const globalPendingCount = orders.filter((o) => o.status === 'pending').length;
 
     res.json({
-      kpis: {
-        totalSales,
-        totalOrders: orders.length,
-        awaitingConfirmation: counts.pending || 0,
-        confirmationRate,
-        deliveryRate,
-        returnRate: 100 - deliveryRate,
-        aov,
-        incompleteCount,
-        customerCount: (db.prepare('SELECT COUNT(*) as c FROM customers').get() as { c: number }).c,
-      },
-      counts,
+      ...analytics,
       pendingOrders,
+      globalPendingCount,
       lowStockProducts,
       pendingReviews,
       failedWebhooks,
-      bySource: Object.values(sourceMap).sort((a, b) => b.revenue - a.revenue),
-      byDistrict: Object.values(districtMap).sort((a, b) => b.orders - a.orders).slice(0, 6),
     });
   });
 
@@ -2135,9 +2119,14 @@ export async function buildApp() {
   // =========================================================================
   // REPORTS, USERS, NOTIFICATIONS, API KEYS & SYSTEM HEALTH
   // =========================================================================
-  app.get('/api/admin/reports', requireStaff('reports.view'), (_req, res) => {
-    const orders = db.prepare('SELECT * FROM orders').all() as Record<string, any>[];
-    const items = db.prepare('SELECT * FROM order_items').all() as Record<string, any>[];
+  app.get('/api/admin/reports', requireStaff('reports.view'), (req, res) => {
+    const from = typeof req.query.from === 'string' && req.query.from ? req.query.from : null;
+    const to = typeof req.query.to === 'string' && req.query.to ? req.query.to : null;
+    const allOrders = db.prepare('SELECT * FROM orders').all() as Record<string, any>[];
+    const orders = from || to ? allOrders.filter((o) => isTimestampInRange(o.created_at, from, to)) : allOrders;
+    const orderIdSet = new Set(orders.map((o) => o.id));
+    const allItems = db.prepare('SELECT * FROM order_items').all() as Record<string, any>[];
+    const items = from || to ? allItems.filter((it) => orderIdSet.has(it.order_id)) : allItems;
 
     const grossSales = orders.reduce((s, o) => s + Number(o.total), 0);
     const discounts = orders.reduce((s, o) => s + Number(o.discount), 0);
