@@ -1,0 +1,96 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #EEF5F5;
+  --surface: #FFFFFF;
+  --ink: #0E2A30;
+  --muted: #557077;
+  --primary: #0E5E6F;
+  --primary-ink: #FFFFFF;
+  --accent: #FF6B5B;
+  --accent-ink: #FFFFFF;
+  --line: #D3E3E5;
+  --image-bg: #E0EDEE;
+  --chip-bg: #FFE3DF;
+  --chip-fg: #A3271B;
+  --sale: #E5483A;
+  --success: #1E9E6A;
+  --footer-bg: #0B3A44;
+  --footer-fg: #CBE3E6;
+  --topbar-bg: #0E5E6F;
+  --topbar-fg: #D9F0F2;
+  --radius-card: 18px;
+  --radius-control: 12px;
+  --font-display: 'Outfit', 'Hind Siliguri', system-ui, sans-serif;
+  --font-body: 'Outfit', 'Hind Siliguri', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.dark {
+  --bg: #07161A;
+  --surface: #0D2329;
+  --ink: #EAF4F5;
+  --muted: #93B4BC;
+  --primary: #177F95;
+  --primary-ink: #FFFFFF;
+  --accent: #FF6B5B;
+  --accent-ink: #FFFFFF;
+  --line: #1B3A42;
+  --image-bg: #122E35;
+  --chip-bg: #4A1C18;
+  --chip-fg: #FFD6D1;
+  --sale: #F05E50;
+  --success: #29B87E;
+  --footer-bg: #041013;
+  --footer-fg: #B8D5D9;
+  --topbar-bg: #0A4652;
+  --topbar-fg: #D9F0F2;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-body);
+    background-color: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    margin: 0;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Print styles for A4 invoices and 4x6 shipping labels */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .print-page-break {
+    page-break-after: always;
+  }
+}

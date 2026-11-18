@@ -1,0 +1,55 @@
+{
+  "exportFormatVersion": 2,
+  "exportTime": "2026-11-18 09:00:00",
+  "containerVersion": {
+    "path": "accounts/000000/containers/000000/versions/1",
+    "accountId": "000000",
+    "containerId": "000000",
+    "containerVersionId": "1",
+    "name": "Shuddho GA4 + Click ID Starter Container",
+    "container": {
+      "name": "Shuddho Storefront",
+      "publicId": "GTM-SHUDDHO",
+      "usageContext": ["WEB"]
+    },
+    "variable": [
+      { "name": "DLV - event_id", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "event_id" }] },
+      { "name": "DLV - ecommerce.transaction_id", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.transaction_id" }] },
+      { "name": "DLV - ecommerce.value", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.value" }] },
+      { "name": "DLV - ecommerce.currency", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.currency" }] },
+      { "name": "DLV - ecommerce.items", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.items" }] },
+      { "name": "DLV - ecommerce.shipping", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.shipping" }] },
+      { "name": "DLV - ecommerce.coupon", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "ecommerce.coupon" }] },
+      { "name": "DLV - user_data", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "user_data" }] }
+    ],
+    "trigger": [
+      { "name": "CE - Ecommerce Events", "type": "CUSTOM_EVENT", "customEventFilter": [{ "type": "MATCH_REGEX", "parameter": [{ "type": "TEMPLATE", "key": "arg0", "value": "{{_event}}" }, { "type": "TEMPLATE", "key": "arg1", "value": "^(view_item_list|select_item|view_item|add_to_cart|remove_from_cart|view_cart|begin_checkout|add_shipping_info|add_payment_info|purchase)$" }] }] },
+      { "name": "CE - Virtual Page View", "type": "CUSTOM_EVENT", "customEventFilter": [{ "type": "EQUALS", "parameter": [{ "type": "TEMPLATE", "key": "arg0", "value": "{{_event}}" }, { "type": "TEMPLATE", "key": "arg1", "value": "page_view" }] }] }
+    ],
+    "tag": [
+      {
+        "name": "GA4 - Ecommerce Event Forwarder",
+        "type": "gaawe",
+        "parameter": [
+          { "type": "TEMPLATE", "key": "eventName", "value": "{{Event}}" },
+          { "type": "BOOLEAN", "key": "sendEcommerceData", "value": "true" },
+          { "type": "TEMPLATE", "key": "getEcommerceDataFrom", "value": "dataLayer" },
+          {
+            "type": "LIST",
+            "key": "eventSettingsTable",
+            "list": [
+              {
+                "type": "MAP",
+                "map": [
+                  { "type": "TEMPLATE", "key": "parameter", "value": "event_id" },
+                  { "type": "TEMPLATE", "key": "parameterValue", "value": "{{DLV - event_id}}" }
+                ]
+              }
+            ]
+          }
+        ],
+        "firingTriggerId": ["CE - Ecommerce Events"]
+      }
+    ]
+  }
+}

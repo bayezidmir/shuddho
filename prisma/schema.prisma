@@ -1,0 +1,182 @@
+// Production PostgreSQL Schema Blueprint for Self-Hosted Shuddho Deployments
+// Note: Live container preview uses built-in node:sqlite (server/db.ts);
+// use this schema with `npx prisma migrate deploy` when deploying on VPS + PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+model StaffUser {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         String    @default("agent")
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  nameEn      String
+  nameBn      String
+  description String?
+  image       String?
+  sortOrder   Int       @default(0)
+  products    Product[]
+}
+
+model Product {
+  id                String           @id @default(cuid())
+  slug              String           @unique
+  sku               String           @unique
+  type              String           @default("simple")
+  status            String           @default("published")
+  featured          Boolean          @default(false)
+  nameEn            String
+  nameBn            String
+  shortDescEn       String?
+  descEn            String?
+  categoryId        String
+  category          Category         @relation(fields: [categoryId], references: [id])
+  price             Int
+  regularPrice      Int
+  costPrice         Int              @default(0)
+  stock             Int              @default(0)
+  reservedStock     Int              @default(0)
+  lowStockThreshold Int              @default(5)
+  images            Json             @default("[]")
+  variants          ProductVariant[]
+  createdAt         DateTime         @default(now())
+}
+
+model ProductVariant {
+  id            String  @id @default(cuid())
+  productId     String
+  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  label         String
+  sku           String  @unique
+  price         Int
+  regularPrice  Int
+  costPrice     Int     @default(0)
+  stock         Int     @default(0)
+  reservedStock Int     @default(0)
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String   @unique
+  email       String?
+  district    String   @default("Dhaka")
+  area        String?
+  address     String?
+  blocked     Boolean  @default(false)
+  firstSource String?
+  createdAt   DateTime @default(now())
+  orders      Order[]
+}
+
+model IncompleteOrder {
+  id              String   @id @default(cuid())
+  name            String?
+  phone           String
+  district        String   @default("Dhaka")
+  area            String?
+  address         String?
+  items           Json
+  subtotal        Int      @default(0)
+  attribution     Json?
+  recoverySmsSent Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+}
+
+model Order {
+  id              String              @id @default(cuid())
+  orderNumber     String              @unique
+  invoiceNumber   String?
+  customerId      String?
+  customer        Customer?           @relation(fields: [customerId], references: [id])
+  customerName    String
+  customerPhone   String
+  customerEmail   String?
+  district        String
+  area            String?
+  address         String
+  deliveryZone    String              @default("inside_dhaka")
+  status          String              @default("pending")
+  paymentMethod   String              @default("cod")
+  paymentStatus   String              @default("unpaid")
+  subtotal        Int
+  discount        Int                 @default(0)
+  shippingFee     Int
+  total           Int
+  courierCode     String?
+  consignmentId   String?
+  trackingCode    String?
+  attribution     Json?
+  confirmedAt     DateTime?
+  confirmedBy     String?
+  createdAt       DateTime            @default(now())
+  items           OrderItem[]
+  deliveries      WebhookDelivery[]
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId    String
+  variantId    String?
+  sku          String
+  name         String
+  variantLabel String?
+  unitPrice    Int
+  costPrice    Int     @default(0)
+  quantity     Int
+}
+
+model WebhookEndpoint {
+  id               String            @id @default(cuid())
+  name             String
+  url              String
+  secret           String
+  events           Json
+  includeHashedPii Boolean           @default(true)
+  enabled          Boolean           @default(true)
+  deliveries       WebhookDelivery[]
+  createdAt        DateTime          @default(now())
+}
+
+model WebhookDelivery {
+  id           String          @id @default(cuid())
+  endpointId   String
+  endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  orderId      String?
+  order        Order?          @relation(fields: [orderId], references: [id])
+  eventName    String
+  eventId      String
+  payload      Json
+  status       String          @default("pending")
+  httpStatus   Int?
+  responseBody String?
+  attempts     Int             @default(0)
+  nextRetryAt  DateTime?
+  createdAt    DateTime        @default(now())
+}

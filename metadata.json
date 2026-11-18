@@ -1,0 +1,8 @@
+{
+  "name": "Shuddho — Pure Bangladeshi Natural & Organic Food Store",
+  "description": "Self-hosted Bangladeshi e-commerce storefront and WooCommerce-style operations admin for pure Sundarban honey, deshi cow ghee, cold-pressed oils, dates, nuts, spices, and tea.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

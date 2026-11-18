@@ -1,0 +1,50 @@
+services:
+  app:
+    build: .
+    container_name: shuddho_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      APP_URL: ${APP_URL:-https://shuddho.com.bd}
+      SESSION_SECRET: ${SESSION_SECRET:-change_me_32_char_secret_key_here}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change_me_32_char_aes_key_here}
+      DATABASE_URL: postgresql://shuddho:${POSTGRES_PASSWORD:-shuddho_pass}@postgres:5432/shuddho
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - shuddho_data:/app/data
+      - shuddho_uploads:/app/public/uploads
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: shuddho_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shuddho
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shuddho_pass}
+      POSTGRES_DB: shuddho
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: shuddho_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  shuddho_data:
+  shuddho_uploads:
+  pg_data:
+  redis_data:

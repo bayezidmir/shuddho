@@ -1,0 +1,424 @@
+0. Your role and how to work
+You are a senior full-stack engineer and product designer. Build a production-ready, self-hosted e-commerce platform for a Bangladeshi online store that sells natural/organic food (honey, ghee, oils, dates, nuts, seeds, rice, spices, tea). The store name is <STORE_NAME> and the domain is <DOMAIN>.
+
+The platform has two parts:
+
+Storefront. A fast, mobile-first shop for customers.
+Admin dashboard. Modelled on the WordPress + WooCommerce admin (left sidebar, list tables with status filters, bulk actions, edit screens with side boxes). It must be complete enough that the owner never needs to touch code to run the business: products, images, banners, menus, pages, couriers, payments, SMS, tracking codes, webhooks, staff and settings are all managed from the UI.
+Working rules:
+
+Work in the phases listed in section 14. At the end of each phase, run the app, run the tests, and give a short summary of what works.
+Never leave placeholder "TODO" features in shipped screens. If something needs an external account (courier API key, SMS key, payment merchant), build the full integration and settings screen, and make it work in sandbox/test mode until real keys are entered.
+Write clean, typed, documented code. Add seed data that looks real (Bangladeshi names, phone numbers, districts, products in ৳).
+Ask me only when a decision truly changes the product. Otherwise choose sensible defaults and list them in DECISIONS.md.
+1. Tech stack and architecture
+Framework: Next.js (latest stable, App Router) + TypeScript, server components where useful.
+Styling: Tailwind CSS + shadcn/ui (Radix) for admin components. Use CSS variables for every design token so the theme is editable from the admin.
+Database: PostgreSQL with Prisma ORM. All money stored as integers (poisha) or Decimal; never floats.
+Cache / queues: Redis + BullMQ for background jobs (webhooks, courier sync, SMS, emails, feed generation, image processing, scheduled sales).
+Auth: Auth.js (NextAuth) or Lucia. Customers log in with phone + OTP (SMS) and optionally email/password or Google. Staff log in with email + password + optional 2FA (TOTP).
+File storage: S3-compatible (Cloudflare R2 / AWS S3 / local disk adapter for VPS). Image processing with sharp: auto-convert to WebP/AVIF, generate sizes (thumb 150, card 400, product 800, zoom 1600), strip EXIF, keep originals.
+Search: PostgreSQL full-text with Bangla + English support (trigram for typo tolerance). Optional Meilisearch adapter.
+Email: SMTP / Resend adapter. SMS: pluggable provider adapters (section 8).
+Deployment: Docker Compose (app, worker, postgres, redis, nginx/caddy), works on any VPS (e.g. Hostinger VPS) and on Vercel + managed Postgres. Include .env.example, health check endpoint, migration and seed scripts, and daily DB backup job.
+Testing: Vitest for units, Playwright for end-to-end (full checkout, order confirmation → webhook fired, courier booking in sandbox, admin permissions).
+Code layout: /app/(store), /app/(admin)/admin, /app/api, /lib (domain services), /workers, /integrations/{couriers,payments,sms,ads}, /prisma.
+Public REST API (/api/v1) with API keys and scopes, plus outgoing webhooks, so other tools can read orders/products.
+2. Design system: "Coast"
+The storefront uses the Coast design: deep teal with coral accents. It feels fresh, clean and modern. All values below become CSS variables, editable in Admin → Appearance → Theme.
+
+Color tokens
+Token	Value	Use
+--bg	#EEF5F5	Page background
+--surface	#FFFFFF	Cards, panels, inputs
+--ink	#0E2A30	Main text, prices
+--muted	#557077	Secondary text
+--primary	#0E5E6F	Primary buttons, links, hero banner, logo mark
+--primary-ink	#FFFFFF	Text on primary
+--accent	#FF6B5B	Coral: highlights, cart count, secondary CTAs, hero highlight words
+--accent-ink	#FFFFFF	Text on accent
+--line	#D3E3E5	Borders, dividers
+--image-bg	#E0EDEE	Product image background
+--chip-bg / --chip-fg	#FFE3DF / #A3271B	Badges, notices
+--sale	#E5483A	Discount badges, errors
+--success	#1E9E6A	Success states
+--footer-bg / --footer-fg	#0B3A44 / #CBE3E6	Footer
+--topbar-bg / --topbar-fg	#0E5E6F / #D9F0F2	Announcement bar
+Also ship a dark mode token set derived from these (deep teal-black surfaces), toggled by system preference and a switch.
+
+Typography
+Outfit (Google Fonts) for headings and UI, weights 400–800.
+Hind Siliguri for Bangla text, always in the fallback stack: 'Outfit','Hind Siliguri',system-ui,sans-serif.
+Scale: 12 / 13.5 / 15 / 17 / 20 / 26 / 34 / clamp(34px, 5vw, 58px) for the hero. Tabular numbers for all prices and tables.
+Shape and spacing
+Card radius 18px, button and input radius 12px, pills fully rounded.
+Borders 1px --line; no heavy shadows. 8px spacing grid; content max-width 1240px; 16px minimum side gutter on mobile.
+Signature layout elements (match the approved prototype)
+Announcement bar on top (editable text, optional link, can rotate several messages, can be scheduled).
+Floating pill header: white rounded bar with logo, category menu inline, cart button in primary color. Below it, a rounded search field. On mobile: logo + cart in the pill, search full-width, categories in a slide-out drawer.
+Hero grid: large teal gradient banner (eyebrow label, headline where the text after the first comma is coral, subtext, coral CTA, product image on the right) + two stacked promo tiles on the right. Every piece is editable in the admin, including images, links and schedule.
+USP row: four cards with icons (Cash on delivery, Lab-tested, Easy returns, 24–72 h delivery). Editable.
+Category tiles, product grids (4 columns desktop, 3 tablet, 2 mobile), promo band with coupon code, "Just landed" row.
+Product card: square image on --image-bg, discount badge (−x%), "Only N left" badge when stock is low, category · size label, name, rating with count, price + crossed-out regular price, full-width "Order now" primary button + icon add-to-cart button.
+Mobile sticky bottom bar showing item count, cart total, and a Checkout button. Floating WhatsApp button.
+Respect prefers-reduced-motion, visible focus states, WCAG AA contrast.
+3. Storefront (customer side): every page and feature
+3.1 Global
+Bilingual: English and Bangla (language switcher; all UI strings translatable; product fields have both languages). Currency ৳ BDT, Bangla or English numerals by language.
+Header as above, mega-menu for categories, live search with suggestions (products, categories, typo tolerant, Bangla and English), recent searches.
+Footer: about, contact, hotline, address, map link, social links, payment logos, policy pages, newsletter signup, trade licence / BIN number field.
+Cookie and consent banner (Google Consent Mode v2 compatible) that can be turned on or off in the admin.
+PWA: installable, offline fallback page, app icons from the admin logo.
+Pop-ups: exit-intent or timed offer pop-up, newsletter pop-up, scheduled campaigns, all managed in the admin.
+Live chat / WhatsApp / Messenger buttons, configurable.
+3.2 Home page
+Built by a section-based homepage builder in the admin (drag to reorder, show/hide, schedule). Available sections: hero grid, slider, USP row, category tiles, product carousel (by category/tag/manual/best sellers/new/on sale), flash sale with countdown, promo band, brand logos, testimonials, blog posts, Instagram/video embed, rich text, image banner, FAQ.
+
+3.3 Category / shop / search pages
+Filters: category, price range slider, brand, attributes (weight, origin, type), rating, in-stock, on-sale. Sort: popular, newest, price, rating, discount.
+Grid/list toggle, pagination or infinite scroll (setting), product count, breadcrumbs, category banner and description (SEO text below the grid).
+Empty and no-result states with suggestions.
+3.4 Product page
+Image gallery with zoom, swipe on mobile, video support (YouTube/MP4), variant-specific images.
+Name (EN/BN), rating, review count, SKU, stock status ("In stock", "Only 3 left", "Out of stock: notify me"), price, regular price, savings in ৳ and %.
+Variants (e.g. 250 g / 500 g / 1 kg) as buttons with their own price, stock, SKU and image.
+Quantity stepper, Add to cart, Order now (cash on delivery) which goes straight to checkout, Order on WhatsApp (prefilled message with product and link), Call to order (hotline).
+Delivery info box (inside/outside Dhaka charges and times, free-delivery threshold, payment methods), delivery estimate by district.
+Tabs or sections: description (rich text), specifications/nutrition table, how to use, FAQ, reviews (with photos, verified-buyer badge, helpful votes, sort/filter), questions & answers.
+Frequently bought together bundle with a bundle discount; related products; recently viewed.
+Wishlist, compare, share buttons. Wholesale/tiered pricing table if enabled. Pre-order and back-in-stock notification (SMS/email).
+Rich SEO: Product, Offer, AggregateRating, BreadcrumbList schema.org JSON-LD; Open Graph image.
+3.5 Cart
+Side drawer (on add) and full cart page. Line items with image, variant, unit price, qty stepper, remove, save for later.
+Free-delivery progress bar ("Add ৳X more for free delivery").
+Coupon field with clear valid/invalid messages; automatic discounts shown.
+Cross-sell suggestions, order note, estimated delivery charge, total.
+Cart persists (logged-in: server; guest: cookie) and syncs across devices after login.
+3.6 Checkout (one page, fast, Bangladesh-friendly)
+Guest checkout by default (no account required). Fields: full name, mobile number (validate BD format 01[3-9]XXXXXXXX, normalise to +8801…), full address, district and thana/area (searchable dropdowns; data seeded for all 64 districts), optional email, order note. All fields and labels are configurable in Settings → Checkout fields (show/hide/required/order/label).
+Delivery area: Inside Dhaka / Dhaka suburbs / Outside Dhaka (rates from Shipping zones), free-delivery rules, express delivery option.
+Payment: Cash on delivery, bKash, Nagad, SSLCommerz (cards, mobile banking), optional advance payment of delivery charge for COD (configurable, e.g. "pay ৳130 delivery fee via bKash to confirm").
+Coupon, order summary, terms checkbox (optional), place order button showing the total.
+Incomplete order capture: as soon as a valid phone number is typed, save the checkout draft (name, phone, address, cart, click IDs) as an incomplete order. Remove it when the order is placed.
+Fraud and duplicate protection: block listed phones/IPs, limit orders per phone/IP per hour, detect duplicate orders (same phone + same items within X minutes), optional OTP verification for COD above a threshold, honeypot + rate limiting, optional Cloudflare Turnstile.
+After placing: Thank-you page with order number, summary, "we will call you to confirm" message, track-order button, and an order SMS to the customer.
+3.7 Order tracking and customer account
+Track order page: order number + phone → visual timeline (Placed → Confirmed → Packed → Handed to courier → Out for delivery → Delivered), courier name and tracking link.
+My account (phone OTP login): orders and statuses, re-order button, invoices (PDF), addresses, wishlist, reviews, loyalty points and wallet, referral link, profile, notification preferences, delete account.
+3.8 Content pages
+About, Contact (form → admin inbox + email), FAQ, Shipping policy, Return & refund policy, Privacy policy, Terms, Blog (categories, tags, author, related posts), landing pages built with the same section builder (for ad campaigns, with their own product and checkout block).
+
+4. Admin dashboard: every module
+Look and feel: WordPress/WooCommerce style. Dark left sidebar (collapsible, icons + labels, badges for counts), top bar (store name, "View store", quick "+ New order/product", notifications bell, profile). Content area uses list tables with status filter links with counts, search, filters, column chooser, pagination, bulk actions, row actions on hover, and edit screens with a main column and side boxes. Fully responsive (usable on a phone for order confirmation). Global command palette (Ctrl/Cmd + K).
+
+4.1 Dashboard
+KPI cards: today's sales, orders, orders awaiting confirmation, confirmation rate, delivered rate, return rate, average order value, new customers, conversion rate. Date range picker with comparison.
+Charts: sales over time, orders by status, sales by source (Facebook, TikTok, Google, organic, direct, from click IDs and UTMs), top products, top districts.
+Action lists: orders awaiting confirmation (with one-click Confirm), incomplete orders, low stock, pending reviews, failed webhooks, courier issues.
+4.2 Orders (the most important module)
+Statuses (editable list with colors; these are defaults): Pending (new, not yet confirmed), On hold (no answer / call later), Confirmed, Processing (packing), Ready to ship, Shipped (handed to courier), Out for delivery, Delivered, Partially delivered, Returned, Cancelled, Refunded, Failed payment, Fake/Spam. Custom statuses can be added.
+List table: order #, date, customer name + phone (click to call / copy / WhatsApp), district, items count, total, payment method + paid/unpaid, status pill, courier check score, source chips (utm_source, click ID types), assigned staff, courier + tracking ID, tags. Filters: status, date, payment method, courier, district, source, staff, tag, amount range. Search by order #, name, phone, tracking ID.
+Row actions: Confirm, Hold, Cancel, Mark fake, Send to courier, Print invoice, Print label, Preview, Edit.
+Bulk actions: change status, send to courier (choose courier), print invoices/labels/packing slips in one PDF, assign to staff, add tag, export CSV/Excel, send SMS, delete (with confirmation).
+Order edit screen:
+Status dropdown with history; customer details (name, phone, alternate phone, email, address, district, area), all editable.
+Items table: change qty, price override, add product (search), remove item, add fee, change shipping charge, apply coupon/discount, recalculated totals. Each change is logged.
+Payment box: method, transaction ID, paid/partial/unpaid, record payment, refund (full/partial, to bKash/manual).
+Order actions box: big Confirm order button, Put on hold, Cancel (reason), Mark fake & block phone, Send to courier, Print invoice, Print shipping label, Send SMS/WhatsApp to customer, Resend order email, Resend conversion to endpoint, Duplicate order, Split order, Merge with another order from the same phone.
+Courier box: chosen courier, consignment/tracking ID, live status from courier, COD amount, delivery charge from courier, "Open in courier panel" link.
+Courier delivery history (fraud check): for this phone, total parcels / delivered / returned across couriers, success %, colored badge. Pulled from courier fraud-check APIs where available, plus our own order history.
+Customer history: previous orders with statuses, total spent, notes, blocked flag.
+Marketing attribution box: utm_source/medium/campaign/content/term, landing page, referrer, every click ID (fbc, fbp, fbclid, ttclid, ttp, gclid, gbraid, wbraid, msclkid, twclid, li_fat_id, ScCid, epik), IP, user agent, device.
+Order notes: private notes and notes to customer (sent by SMS/email), system notes (every status change, edit, webhook delivery, courier event) with time and staff name.
+Conversion deliveries: list of webhook sends for this order with response code and a "view payload" modal.
+Call log: staff can log call attempts (answered / no answer / switched off / wrong number) which can auto-move the order to On hold and schedule a reminder.
+Create order manually (phone/Facebook orders) with customer search, product search, shipping and payment.
+Invoices and labels: invoice template editor (logo, address, BIN, footer note, QR code with tracking link), A4 invoice, A5/thermal 80mm, 4×6 shipping label with barcode/QR. Sequential invoice numbers with prefix.
+Order assignment and call centre mode: assign pending orders to confirmation agents round-robin; agent screen shows one order at a time with call/confirm/hold buttons; agent performance report.
+4.3 Incomplete orders (abandoned checkouts)
+List of checkout drafts with name, phone, cart items, value, captured time, click IDs, courier check score.
+Actions: Call, WhatsApp, Convert to order (one click, opens the new order), send recovery SMS with a cart link and optional coupon, delete, mark as contacted.
+Automatic recovery: send SMS/email after X minutes and again after Y hours (configurable, with opt-out).
+4.4 Customers
+List: name, phone, email, district, orders count, total spent, last order, average order value, delivered %, tags, blocked status, source of first order.
+Customer profile: all orders, addresses, notes, loyalty points, wallet, reviews, communication log, merge duplicate customers, block/unblock (phone, IP, device).
+Segments: new, repeat, VIP (spent > X), at-risk (no order in 90 days), COD refusers. Export segments to CSV and to Meta / Google / TikTok custom audience CSV (hashed).
+Customer groups with special pricing (wholesale, reseller).
+4.5 Products
+List table: image, name, SKU, stock, price/sale price, category, tags, status (published/draft/scheduled/private), featured star, date. Filters, search, quick edit inline (price, stock, status), bulk edit (price % change, category, stock, status), duplicate, trash/restore.
+Product types: simple, variable (attributes such as weight/size/flavor → variations with their own SKU, price, sale price, stock, weight, image), bundle/combo (made of other products, stock deducted from components), digital (optional), subscription (optional, later).
+Edit screen: name EN/BN, slug, rich description EN/BN (block editor with images, tables, video), short description, product image upload, gallery (drag to reorder, alt text), video URL, regular price, sale price with schedule, cost price (for profit reports), tax class, SKU, barcode/GTIN, stock management (qty, low-stock threshold, allow backorders, pre-order), weight and dimensions (for courier), shipping class, categories, tags, brand, attributes, related/upsell/cross-sell products, purchase limits (min/max per order), "Order now" button toggle, product badges (New, Best seller, Organic, custom), FAQ items, nutrition/spec table, SEO (meta title, description, OG image, canonical, noindex), visibility, featured, publish date, menu order.
+Image handling: drag-and-drop upload, crop/rotate, auto-WebP, multiple sizes, media library reuse, bulk upload, alt text.
+Categories (nested, image, banner, description, SEO), Tags, Brands, Attributes (global, with terms and swatches).
+Import / export products via CSV/Excel (with images by URL), and sample template.
+Reviews: moderation queue (approve, reply, hide, mark spam), photo reviews, auto request a review by SMS N days after delivery, import reviews.
+4.6 Inventory
+Stock overview per product/variant: on hand, reserved (in unconfirmed orders), available, incoming, low-stock threshold, value at cost.
+Stock is reserved when an order is placed, deducted when confirmed (configurable: at placement or confirmation), returned on cancel/return/fake.
+Stock adjustments with reason (damage, expiry, count correction, gift) and full stock movement history.
+Multiple warehouses/locations (optional), batch/lot and expiry date tracking (important for food), FEFO picking hint.
+Suppliers and purchase orders (create PO, receive stock, cost price updates).
+Low-stock and out-of-stock alerts by email/SMS/dashboard; back-in-stock notifications to waiting customers.
+4.7 Couriers (one-click courier integration)
+See section 7 for full details. Admin screens: Couriers → Accounts (connect each courier), Couriers → Bookings (all consignments and statuses), Couriers → COD reconciliation, Couriers → Settings (default courier, auto-booking rules, pickup store, label format).
+
+4.8 Marketing
+Coupons: fixed/percentage/free shipping; minimum spend, maximum discount, usage limits (total, per customer/phone), product/category include/exclude, first-order only, date range, auto-apply, one-click coupon links (?coupon=CODE).
+Automatic discounts: flash sales with countdown (scheduled), buy X get Y, quantity/tiered discounts, bundle discounts, free gift with order over X, free delivery rules.
+Loyalty & referral: points per ৳ spent, redeem at checkout, referral rewards, wallet/store credit.
+Tracking & pixels: see section 9 (GTM container field, conversion webhook, optional direct Pixel IDs).
+Product feeds: auto-generated, scheduled XML/CSV feeds for Meta Catalog, Google Merchant Center, TikTok Catalog (with field mapping, exclusions, custom labels).
+UTM link builder and campaign landing pages.
+SMS/WhatsApp campaigns: send bulk messages to segments with templates, scheduling, cost estimate and opt-out handling.
+Email newsletters: subscriber list, basic campaign sender or export to Mailchimp/Brevo.
+4.9 Content (CMS)
+Pages (block/section editor), Blog posts, Media library, Menus (header, footer, mobile; drag-and-drop), Homepage builder (section 3.2), Banners & sliders (images for desktop and mobile separately, link, schedule), Announcement bar, Pop-ups, Testimonials, FAQ sets, contact form inbox, redirects manager (301/302), custom 404 page.
+4.10 Appearance
+Theme editor: all color tokens, fonts (from a list of Google Fonts), radius, logo (light/dark), favicon, header style, product card options (show rating, show "Order now", badge style), with live preview and reset to Coast defaults.
+Custom CSS box and custom code injection boxes: <head>, after <body> open, before </body> (for any extra scripts), applied site-wide without code edits.
+4.11 Reports & analytics
+Sales (gross, net, discounts, shipping, refunds), orders by status, confirmation rate, delivery success rate by courier and district, return reasons, products (sold, revenue, profit using cost price), categories, coupons usage, customers (new vs returning, LTV, cohorts), marketing sources (orders and revenue by utm_source, campaign, click ID platform; confirmed vs unconfirmed), incomplete order recovery rate, staff performance (confirmations, calls), stock reports, tax report, COD reconciliation report. Every report has a date range, comparison, charts, and CSV/Excel export. Scheduled email reports (daily/weekly).
+
+4.12 Users, roles and permissions
+Roles: Owner/Admin, Store manager, Order confirmation agent (only sees/edits orders, can confirm/hold/cancel, cannot see reports/settings), Packer/Warehouse (sees confirmed orders, prints labels, marks packed), Content editor (products, pages, banners), Marketing (coupons, tracking, feeds, reports), Accountant (reports, payments, reconciliation, read-only orders). Custom roles with a permission matrix.
+2FA, session list with logout, login history, IP allow-list option for admin.
+Activity / audit log of every change (who, what, before/after, when), filterable.
+4.13 Notifications
+Templates for SMS, email and WhatsApp per event: order placed, confirmed, shipped (with tracking link), out for delivery, delivered, cancelled, refund, OTP, abandoned cart, back in stock, review request. Variables like {name}, {order_id}, {total}, {tracking_url}. Bangla and English versions. On/off per event.
+Admin alerts: new order (sound + browser push in admin), low stock, failed webhook, courier error. Telegram/Slack/email channels.
+4.14 Settings
+General: store name, logo, address, phone/hotline, email, BIN/trade licence, timezone (Asia/Dhaka), currency and format, languages, order number prefix and start number, maintenance mode.
+Checkout: field manager, guest checkout, terms page, minimum order amount, OTP for COD toggle and threshold, advance delivery fee option, duplicate/fraud rules, blocked phones/IPs list.
+Shipping: zones (Inside Dhaka, Dhaka suburbs, Outside Dhaka, custom by district), rates (flat, weight-based, order-value-based), free-delivery threshold, shipping classes, delivery time estimates, express delivery.
+Payments: COD (enable, extra fee, max amount), bKash (Tokenized Checkout / PGW: app key, app secret, username, password, sandbox toggle), Nagad (merchant ID, keys, sandbox), SSLCommerz (store ID, password, sandbox), manual bank transfer, partial/advance payment rules. Each gateway with test-connection button and transaction logs.
+Tax/VAT: enable, rates, prices inclusive/exclusive, VAT number on invoices.
+Tracking (GTM): section 9.
+Conversion webhook: section 9.
+Couriers: section 7. SMS gateway: section 8.
+Emails: SMTP/Resend settings, sender name, templates.
+SEO: default meta templates, sitemap.xml, robots.txt editor, schema settings, Google Search Console verification, canonical rules.
+Integrations: Google Analytics 4 ID (optional if not using GTM), Facebook Messenger/WhatsApp, Google Maps key, Cloudflare Turnstile keys, Meilisearch, storage (R2/S3), backups destination.
+API & webhooks: API keys with scopes; outgoing webhooks for events (order.created, order.status_changed, product.updated, stock.low, customer.created) besides the conversion webhook.
+Backups & system: one-click DB backup/download, scheduled backups, restore, job queue monitor (pending/failed jobs with retry), error log viewer, cache clear, system health (DB, Redis, storage, queue, cron, disk).
+Privacy: cookie consent settings, data export/delete for a customer, data retention period for incomplete orders and logs.
+5. Order lifecycle (business rules)
+Customer places order → status Pending; stock reserved; purchase pushed to the dataLayer in the browser; customer gets "order received" SMS; admin gets a new-order alert.
+Agent calls the customer. Outcomes: Confirm, On hold (no answer; auto-reminder; after N failed attempts auto-cancel if enabled), Cancel (reason required), Fake/Spam (blocks phone, optionally IP).
+On Confirmed: stock deducted, confirmation SMS sent, conversion webhook fires (section 9.4), optional auto-booking to the default courier.
+Processing → Ready to ship (packed, label printed) → Shipped (courier consignment created, tracking ID saved, SMS with tracking link) → courier status sync updates Out for delivery / Delivered / Returned / Partially delivered automatically.
+Delivered: COD amount marked collectable; review-request SMS after N days; optional OrderDelivered webhook.
+Returned/Cancelled after confirmation: stock restored (or sent to damaged stock), optional OrderCancelled webhook so ad platforms can be adjusted, refund flow if prepaid. Every transition is logged with staff name and time. Allowed transitions are enforced, with an admin override.
+6. Customer-facing communications
+SMS on: order placed, confirmed, shipped (tracking link), delivered, cancelled; OTP; abandoned cart; back in stock; review request. Emails with the same events if an email is given. All templates editable in Bangla and English in the admin.
+
+7. Courier integration (one click, like WooCommerce courier plugins)
+Build a pluggable courier adapter system (/integrations/couriers/<name>), each implementing the same interface: testConnection(), getCities/Zones/Areas() (if the courier needs location IDs), createParcel(order), bulkCreate(orders), getStatus(trackingId), cancelParcel(), getDeliveryCharge(…), getBalance()/payments (if available), handleWebhook(payload), fraudCheck(phone) (if available).
+
+Ship adapters for the main Bangladeshi couriers, using each courier's official merchant API documentation (read it; don't guess endpoints):
+
+Steadfast Courier (API key + secret key; create order, bulk create, status by consignment ID / invoice / tracking code, balance).
+Pathao Courier (OAuth client ID/secret + merchant credentials; store ID; city → zone → area IDs; create order, price calculation, status webhooks).
+RedX (API token; areas; create parcel; tracking; webhooks).
+Paperfly, eCourier, and a "Manual / Other courier" option (enter courier name + tracking ID by hand, with a tracking URL template).
+Admin features:
+
+Couriers → Accounts: connect each courier (credentials, sandbox/live toggle, default pickup store/address, test connection button, status: connected / error).
+Location mapping: our districts/areas mapped to each courier's city/zone/area IDs (auto-suggest by name, manual override, saved per order).
+One-click "Send to courier" on the order screen and in bulk from the order list. A pop-up lets staff confirm or change courier, COD amount (auto = order due amount), weight, item description, delivery type and note; then it creates the parcel and stores the consignment ID, tracking code, courier delivery charge on the order, sets status to Shipped, and sends the tracking SMS.
+Auto-booking rules (optional): e.g. "When an order is Confirmed and district is Dhaka → Pathao; otherwise → Steadfast".
+Status sync: receive courier webhooks where supported, and poll the rest every 30–60 minutes via the job queue. Map courier statuses to our statuses (configurable mapping table).
+Bookings list: all parcels with courier, tracking, status, COD, charge, date; filters; re-sync and cancel buttons; error list with the courier's error message.
+Labels: print courier labels/our 4×6 labels with barcode, in bulk.
+COD reconciliation: import or fetch courier payment reports, match to orders, show collected vs pending vs mismatched amounts, mark orders as paid.
+Fraud / delivery-success check by phone: call couriers' fraud-check endpoints where available plus our own history; show "X of Y delivered (Z%)" with a colored badge on the order list, order screen, incomplete orders and checkout risk rules (e.g. auto-hold if success < 50%).
+Logs of every courier API request/response (secrets masked).
+8. SMS, WhatsApp and payments integrations
+SMS gateway adapters: build a common interface (send(to, text), balance()), and ship adapters for popular Bangladeshi providers (e.g. SSL Wireless, BulkSMSBD, Alpha SMS, Muthofun / generic HTTP API with configurable URL, params and success check). Settings: provider, API key, sender ID, masking/non-masking, test SMS button, balance display, delivery logs, Bangla (Unicode) support with SMS-part counter.
+WhatsApp: click-to-chat links everywhere; optional WhatsApp Cloud API adapter for template notifications.
+Payments: bKash, Nagad, SSLCommerz, COD, manual, as listed in Settings → Payments. Handle callbacks/IPN securely, verify amounts server-side, store transaction IDs, support refunds where the gateway allows, and log every request/response.
+9. Tracking specification (must be implemented exactly)
+9.1 Google Tag Manager without code edits
+Admin → Settings → Tracking: toggle "Enable GTM", field Container ID (GTM-XXXXXXX, validated). From the ID, generate the official GTM <head> snippet and the <noscript> body snippet and inject them on every storefront page (head snippet as high as possible in <head>; noscript right after <body>).
+Optional override fields: paste full <head> code and paste full <body> code. If filled, they replace the generated snippets. This supports server-side GTM / custom loader domains (e.g. Stape).
+Show a read-only preview of exactly what is injected. Changes apply instantly (cache-busted), no deploy needed.
+Also provide optional direct fields (used only if GTM is off): GA4 measurement ID, Meta Pixel ID, TikTok Pixel ID, Google Ads conversion ID/label, Microsoft UET tag ID.
+Initialise window.dataLayer = window.dataLayer || [] before the GTM snippet. Support Google Consent Mode v2 defaults from the cookie banner settings.
+9.2 dataLayer events (GA4 ecommerce format)
+Before every ecommerce event push { ecommerce: null }. Every event includes a unique event_id (UUID or <event>.<timestamp>.<random>) for browser/server deduplication. Currency BDT. Item objects:
+
+{
+  "item_id": "HN-500",
+  "item_name": "Sundarban Natural Honey",
+  "item_brand": "<STORE_NAME>",
+  "item_category": "Honey",
+  "item_variant": "500 g",
+  "price": 850,
+  "discount": 140,
+  "quantity": 1,
+  "index": 0
+}
+Event	Fires when	Payload
+page_view	Every page load and client-side route change	page_type (home, category, product, cart, checkout, thank_you, page, search), page_location, page_title, user_id if logged in, customer_type (new/returning)
+view_item	Product page viewed	ecommerce: {currency, value, items:[1]}
+add_to_cart	Add to cart, Order now, Buy now, qty increase, bundle add	ecommerce: {currency, value, items} (only the quantity added)
+view_cart	Cart page or cart drawer opened	ecommerce: {currency, value, items}
+remove_from_cart	Item removed or qty decreased	ecommerce: {currency, value, items} (quantity removed)
+begin_checkout	Checkout page opened	ecommerce: {currency, value, coupon, items}
+add_shipping_info	Delivery area selected	ecommerce: {currency, value, coupon, shipping_tier, items}
+add_payment_info	Payment method selected	ecommerce: {currency, value, coupon, payment_type, items}
+purchase	Thank-you page, once per order (guard against reloads)	ecommerce: {transaction_id, value, tax, shipping, discount, currency, coupon, items} + user_data
+Also push (recommended extras): view_item_list, select_item, search, add_to_wishlist, sign_up, login, generate_lead (newsletter).
+
+purchase example:
+
+dataLayer.push({ ecommerce: null });
+dataLayer.push({
+  event: "purchase",
+  event_id: "order_10249_purchase",
+  ecommerce: {
+    transaction_id: "10249",
+    value: 1920, tax: 0, shipping: 70, discount: 0,
+    currency: "BDT", coupon: "",
+    items: [ /* item objects */ ]
+  },
+  user_data: {
+    phone_number: "+8801711482910",
+    email: "rahim@gmail.com",
+    address: { first_name: "Rahim", last_name: "Uddin", city: "Dhaka", country: "BD" }
+  }
+});
+The browser purchase uses the same event_id pattern as the server Purchase (order_<id>_purchase) so Meta/TikTok can deduplicate. Provide a ready-to-import GTM container JSON (variables, triggers, GA4 event tags) and a TRACKING.md explaining the setup.
+
+9.3 Click ID and attribution capture
+On every landing, read URL parameters and cookies, store them in first-party cookies (90 days) and in the session, and attach them to the cart, incomplete order and order:
+
+Field	Platform	Source	Format / rule
+fbc	Meta	Built from fbclid URL param, or read _fbc cookie	fb.1.<unix_ms_when_first_seen>.<fbclid>. If a new fbclid arrives, rebuild it; if the same fbclid, keep the original timestamp. Never modify the fbclid value. (It is fbc, not "abc".)
+fbp	Meta	_fbp cookie; if missing, create fb.1.<unix_ms>.<random 10-digit>	
+fbclid	Meta	URL param	raw, for reference
+ttclid	TikTok	URL param / ttclid cookie	raw
+ttp	TikTok	_ttp cookie	raw
+gclid	Google Ads	URL param / _gcl_aw cookie	raw
+gbraid	Google Ads (iOS app→web)	URL param / _gcl_gb	raw
+wbraid	Google Ads (iOS web→web)	URL param	raw
+msclkid	Microsoft Ads	URL param / _uetmsclkid	raw
+twclid	X (Twitter) Ads	URL param	raw
+li_fat_id	LinkedIn Ads	URL param	raw
+ScCid	Snapchat Ads	URL param / _scid	raw
+epik	Pinterest Ads	URL param / _epik	raw
+Also store: utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_id, first-touch and last-touch landing page and timestamp, referrer, client IP (respect proxies/Cloudflare CF-Connecting-IP), user agent, and device type. Show all of it on the order screen.
+
+9.4 Conversion webhook, sent on order CONFIRMATION (not at checkout)
+Admin → Settings → Conversion webhook:
+
+Enable toggle; Endpoint URL (HTTPS only; you may add several endpoints, each with its own events and on/off); signing secret (auto-generated, regenerate button).
+Events: Confirmed → Purchase (default on), Delivered → OrderDelivered, Cancelled/Returned after confirmation → OrderCancelled, optional Placed → OrderPlaced (off by default).
+Option: include SHA-256 hashed user data (normalised per Meta/Google rules: lowercase, trimmed, phone in E.164 without + for hashing).
+Send test event button; delivery log (time, order, event, endpoint, HTTP status, duration, attempts, request/response body viewer, retry button).
+Delivery via the job queue with retries: 1 min, 5 min, 30 min, 2 h, 12 h (then marked failed and shown on the dashboard). Idempotent: the same event_id on every retry and resend.
+Headers: Content-Type: application/json, X-Store-Event: Purchase, X-Store-Signature: sha256=<HMAC_SHA256(raw_body, secret)>, X-Store-Timestamp, Idempotency-Key: <event_id>.
+Payload (POST JSON):
+
+{
+  "event_name": "Purchase",
+  "event_id": "order_10249_purchase",
+  "event_time": 1763455700,
+  "action_source": "website",
+  "test_event": false,
+  "order_status": "confirmed",
+  "order": {
+    "id": "10249",
+    "created_at": "2026-11-18T08:56:15Z",
+    "confirmed_at": "2026-11-18T09:20:03Z",
+    "confirmed_by": "agent@store.com",
+    "currency": "BDT",
+    "value": 1920,
+    "subtotal": 1850,
+    "shipping": 70,
+    "discount": 0,
+    "tax": 0,
+    "coupon": null,
+    "payment_method": "Cash on delivery",
+    "payment_status": "unpaid",
+    "num_items": 2,
+    "items": [
+      { "item_id": "HN-500", "item_name": "Sundarban Natural Honey", "item_category": "Honey", "item_variant": "500 g", "price": 850, "quantity": 1 }
+    ]
+  },
+  "customer": {
+    "external_id": "cust_8801711482910",
+    "name": "Rahim Uddin",
+    "phone": "+8801711482910",
+    "email": "rahim@gmail.com",
+    "city": "Dhaka",
+    "district": "Dhaka",
+    "address": "Mirpur 10, Dhaka",
+    "country": "BD",
+    "is_returning": false
+  },
+  "user_data_hashed": {
+    "ph": "<sha256>", "em": "<sha256>", "fn": "<sha256>", "ln": "<sha256>",
+    "ct": "<sha256>", "country": "<sha256 of 'bd'>", "external_id": "<sha256>"
+  },
+  "click_ids": {
+    "fbc": "fb.1.1763455648123.IwAR2xYz...",
+    "fbp": "fb.1.1763196448000.1234567890",
+    "fbclid": "IwAR2xYz...",
+    "ttclid": null, "ttp": null,
+    "gclid": null, "gbraid": null, "wbraid": null,
+    "msclkid": null, "twclid": null, "li_fat_id": null, "ScCid": null, "epik": null
+  },
+  "attribution": {
+    "utm_source": "facebook", "utm_medium": "paid_social", "utm_campaign": "winter_honey",
+    "utm_content": null, "utm_term": null,
+    "landing_page": "https://<DOMAIN>/products/hn-500?fbclid=...",
+    "referrer": "https://l.facebook.com/",
+    "first_touch_at": "2026-11-18T08:40:02Z"
+  },
+  "context": {
+    "client_ip_address": "103.112.55.21",
+    "client_user_agent": "Mozilla/5.0 ...",
+    "event_source_url": "https://<DOMAIN>/checkout"
+  }
+}
+The endpoint can be a server-side GTM (Stape) URL, Make/Zapier/n8n webhook, or my own API. Write WEBHOOK.md with the schema, signature verification code samples (Node and PHP), and mapping notes for Meta Conversions API, TikTok Events API and Google Ads offline/enhanced conversions (gclid/gbraid/wbraid + conversion time).
+
+Optional built-in senders (off by default, configurable): send the confirmed Purchase directly to Meta CAPI (Pixel ID + access token + test event code), TikTok Events API (pixel code + token) and Google Ads (via API or offline conversion upload file), using the same event_id for dedup.
+
+10. Data model (minimum)
+Users/Staff, Roles, Permissions, Customers, Addresses, Products, ProductTranslations, Variants, Attributes, AttributeTerms, Categories, Tags, Brands, Media, ProductMedia, Reviews, Questions, Inventory (per variant/location), StockMovements, Batches (expiry), Suppliers, PurchaseOrders, Carts, CartItems, IncompleteOrders, Orders, OrderItems, OrderStatusHistory, OrderNotes, CallLogs, Payments, Refunds, Coupons, CouponUsages, Promotions, LoyaltyLedger, Wallet, ShippingZones, ShippingRates, Districts, Areas, CourierAccounts, CourierLocationMaps, Shipments, ShipmentEvents, CodSettlements, Attribution (click IDs, UTMs, per order and per incomplete order), WebhookEndpoints, WebhookDeliveries, OutgoingWebhooks, ApiKeys, NotificationTemplates, NotificationLogs (SMS/email/WhatsApp), Pages, Posts, Menus, Banners, HomepageSections, Popups, Redirects, Settings (key/value, typed, cached), ThemeTokens, AuditLog, BlockList (phone/IP/device), Jobs.
+
+11. Security, privacy and reliability
+OWASP top 10 covered: input validation (zod), output escaping, CSRF protection, secure cookies, rate limiting (login, OTP, checkout, APIs), file upload validation (type, size, image re-encode), SSRF protection on webhook URLs (block private IPs), secrets encrypted at rest (courier/payment/SMS keys), RBAC enforced on the server for every action.
+The GTM/custom code boxes are owner-only and their content is logged in the audit log.
+Daily backups, migration safety, idempotent payment/courier callbacks, job retries with dead-letter queue.
+Privacy: consent mode, customer data export/delete, retention settings, hashed PII in outbound marketing data.
+12. Performance and SEO
+Lighthouse mobile ≥ 90 on home, category and product pages. Static generation / ISR for catalog pages, edge caching, image CDN with responsive srcset, lazy loading, font preloading, minimal JS on the storefront.
+SEO: clean URLs (/products/<slug>, /category/<slug>), editable meta, canonical tags, sitemaps (products, categories, pages, posts), robots.txt, schema.org (Organization, WebSite+SearchAction, Product, BreadcrumbList, FAQ, Article), hreflang for EN/BN, 301 redirects manager, breadcrumbs.
+13. Accessibility and quality
+WCAG 2.1 AA, keyboard navigation, focus states, labelled form fields, alt text, reduced motion. Error messages explain how to fix the problem. Every admin list has empty states and loading skeletons.
+
+14. Build phases (deliver in this order)
+Foundation: project setup, DB schema, auth (staff + customer OTP), settings service, theme tokens (Coast), media upload pipeline, admin shell (sidebar, list table and edit screen components), audit log.
+Catalog: products (simple + variable + bundle), categories, tags, brands, attributes, media gallery, import/export, inventory basics, storefront home/category/product/search pages with the Coast design.
+Cart & checkout: cart, coupons, shipping zones, COD + bKash + Nagad + SSLCommerz (sandbox), incomplete order capture, fraud rules, thank-you page, order tracking page, SMS gateway + templates.
+Orders admin: full order list and edit screen, statuses and transitions, call log, manual orders, invoices/labels PDF, notes, customer profiles, agent mode, roles and permissions.
+Tracking: GTM injection settings, dataLayer events, click ID capture, attribution on orders, conversion webhook on confirmation with signing, retries, logs and test button, GTM container JSON, TRACKING.md, WEBHOOK.md.
+Couriers: adapter system, Steadfast, Pathao, RedX (+ Paperfly, eCourier, manual), location mapping, one-click and bulk booking, status sync, labels, COD reconciliation, fraud check.
+Marketing & content: automatic discounts, flash sales, loyalty/referral, product feeds, SMS campaigns, homepage builder, pages/blog, menus, banners, pop-ups, reviews moderation, redirects.
+Reports, notifications, system: all reports with export, scheduled reports, admin alerts, backups, queue monitor, health page, public API + outgoing webhooks, PWA, performance and SEO pass, full Playwright test suite, deployment docs.
+15. Acceptance checklist (must all pass)
+ The owner can add a product with variants, upload images from their computer, and see it live without touching code.
+ Homepage banner, menus, announcement bar, colors, logo and fonts are editable in the admin.
+ Pasting a GTM container ID (or full snippets) in Settings → Tracking injects GTM on every storefront page immediately.
+ All nine events (page_view, view_item, add_to_cart, view_cart, remove_from_cart, begin_checkout, add_shipping_info, add_payment_info, purchase) appear in GTM Preview with correct GA4 ecommerce data and event_id.
+ Visiting with ?fbclid=ABC produces fbc = fb.1.<ms>.ABC; ttclid, gclid, gbraid, wbraid, msclkid are captured and saved on the order.
+ Placing an order does not call the conversion endpoint; pressing Confirm in the admin sends one signed POST with the payload in 9.4, logged with its response, retried on failure, and deduplicated by event_id.
+ Typing a phone at checkout and leaving creates an incomplete order; "Convert to order" works.
+ One click on "Send to courier" creates a parcel in Steadfast/Pathao/RedX sandbox, saves the tracking ID, sends SMS, and later status changes sync automatically.
+ The courier success-rate badge appears on orders and incomplete orders.
+ Order confirmation agent role can confirm orders but cannot open settings or reports.
+ Invoices and labels print in bulk; reports export to CSV/Excel.
+ Lighthouse mobile ≥ 90 on the home and product pages; no accessibility errors in axe.
+ docker compose up brings the whole stack up with seed data; README explains setup, environment variables and deployment.
