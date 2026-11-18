@@ -14,9 +14,46 @@ export interface AuthedRequest extends Request {
   staff?: StaffSession;
 }
 
+// --- Vercel: signed (stateless) session tokens ---------------------------------
+// On Vercel, several server instances run at once and each has its own throwaway
+// SQLite file in /tmp, so a session row written by one instance is missing on the
+// others and the admin gets logged out. There, the token also carries a signed
+// "staff id + expiry" that any instance can verify with APP_SECRET.
+// Outside Vercel, sessions are DB-only as before (so logout revokes immediately).
+const SIGNED_SESSIONS = Boolean(process.env.VERCEL);
+const SESSION_SIGNING_KEY = crypto
+  .createHash('sha256')
+  .update(`staff-session:${process.env.APP_SECRET || 'shuddho-coast-default-secret-key-2026'}`)
+  .digest();
+
+function signSessionPayload(payload: string): string {
+  return crypto.createHmac('sha256', SESSION_SIGNING_KEY).update(payload).digest('base64url');
+}
+
+function createSignedToken(staffId: string, expiresAtMs: number): string {
+  const payload = Buffer.from(JSON.stringify({ sid: staffId, exp: expiresAtMs, n: crypto.randomBytes(8).toString('hex') })).toString('base64url');
+  return `v1.${payload}.${signSessionPayload(payload)}`;
+}
+
+function verifySignedToken(token: string): { sid: string; exp: number } | null {
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== 'v1') return null;
+  const expected = Buffer.from(signSessionPayload(parts[1]));
+  const given = Buffer.from(parts[2]);
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (typeof data.sid !== 'string' || typeof data.exp !== 'number' || data.exp < Date.now()) return null;
+    return { sid: data.sid, exp: data.exp };
+  } catch {
+    return null;
+  }
+}
+
 export function createStaffSession(staffId: string, ip: string, userAgent: string): string {
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAtMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  const token = SIGNED_SESSIONS ? createSignedToken(staffId, expiresAtMs) : crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(expiresAtMs).toISOString();
   db.prepare(`
     INSERT INTO staff_sessions (token, staff_id, ip, user_agent, expires_at)
     VALUES (?, ?, ?, ?, ?)
@@ -33,6 +70,17 @@ export function getStaffFromToken(token: string | undefined): StaffSession | nul
     JOIN staff_users u ON u.id = s.staff_id
     WHERE s.token = ?
   `).get(token) as { id: string; name: string; email: string; role: StaffRole; active: number; expires_at: string } | undefined;
+
+  if (!row && SIGNED_SESSIONS) {
+    // Session was created on another Vercel instance: trust the signed token instead.
+    const signed = verifySignedToken(token);
+    if (!signed) return null;
+    const staff = db
+      .prepare('SELECT id, name, email, role, active FROM staff_users WHERE id = ?')
+      .get(signed.sid) as { id: string; name: string; email: string; role: StaffRole; active: number } | undefined;
+    if (!staff || !staff.active) return null;
+    return { id: staff.id, name: staff.name, email: staff.email, role: staff.role };
+  }
 
   if (!row || !row.active) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
