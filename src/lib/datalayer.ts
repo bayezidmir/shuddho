@@ -184,8 +184,10 @@ export function trackPurchaseOnce(params: {
   }
   firedPurchases.add(params.orderId);
 
+  // Fired when the customer places an order (Thank-You page). This is NOT a confirmed
+  // purchase: the server-side conversion webhook sends `Purchase` when Admin confirms.
   return pushEcommerceEvent(
-    'purchase',
+    'place_order',
     {
       transaction_id: params.orderId,
       value: params.value,
@@ -197,7 +199,7 @@ export function trackPurchaseOnce(params: {
       items: params.items,
     },
     {
-      event_id: `order_${params.orderId}_purchase`,
+      event_id: `order_${params.orderId}_place_order`,
       user_data: params.user_data,
     },
   );

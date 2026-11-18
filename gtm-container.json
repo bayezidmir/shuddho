@@ -23,7 +23,7 @@
       { "name": "DLV - user_data", "type": "v", "parameter": [{ "type": "INTEGER", "key": "dataLayerVersion", "value": "2" }, { "type": "TEMPLATE", "key": "name", "value": "user_data" }] }
     ],
     "trigger": [
-      { "name": "CE - Ecommerce Events", "type": "CUSTOM_EVENT", "customEventFilter": [{ "type": "MATCH_REGEX", "parameter": [{ "type": "TEMPLATE", "key": "arg0", "value": "{{_event}}" }, { "type": "TEMPLATE", "key": "arg1", "value": "^(view_item_list|select_item|view_item|add_to_cart|remove_from_cart|view_cart|begin_checkout|add_shipping_info|add_payment_info|purchase)$" }] }] },
+      { "name": "CE - Ecommerce Events", "type": "CUSTOM_EVENT", "customEventFilter": [{ "type": "MATCH_REGEX", "parameter": [{ "type": "TEMPLATE", "key": "arg0", "value": "{{_event}}" }, { "type": "TEMPLATE", "key": "arg1", "value": "^(view_item_list|select_item|view_item|add_to_cart|remove_from_cart|view_cart|begin_checkout|add_shipping_info|add_payment_info|place_order)$" }] }] },
       { "name": "CE - Virtual Page View", "type": "CUSTOM_EVENT", "customEventFilter": [{ "type": "EQUALS", "parameter": [{ "type": "TEMPLATE", "key": "arg0", "value": "{{_event}}" }, { "type": "TEMPLATE", "key": "arg1", "value": "page_view" }] }] }
     ],
     "tag": [

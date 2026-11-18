@@ -33,10 +33,11 @@ Every ecommerce push in `src/lib/datalayer.ts` resets `{ ecommerce: null }` firs
 | `begin_checkout` | Loading `/checkout` | `begin_checkout.<ts>.<rand>` | `value`, `coupon`, `items[]` |
 | `add_shipping_info` | Selecting BD District / Zone | `add_shipping_info.<ts>.<rand>` | `shipping_tier`, `items[]` |
 | `add_payment_info` | Selecting COD / bKash / Nagad / Card | `add_payment_info.<ts>.<rand>` | `payment_type`, `items[]` |
-| `purchase` | Thank-You Page (once per session) | `order_<order_number>_purchase` | `transaction_id`, `value`, `shipping`, `discount`, `user_data` |
+| `place_order` | Thank-You Page (once per session) — order placed, not yet confirmed | `order_<order_number>_place_order` | `transaction_id`, `value`, `shipping`, `discount`, `user_data` |
 
 ## 4. Browser + Server Deduplication
-Both the Thank-You page `purchase` dataLayer event and the server-side Conversion Webhook `Purchase` event emit the exact same deterministic key:
-`event_id = "order_<order_number>_purchase"`
+The browser fires `place_order` when the customer places an order (`event_id = "order_<order_number>_place_order"`).
+The confirmed `Purchase` is sent only by the server-side Conversion Webhook when Admin confirms the order (`event_id = "order_<order_number>_purchase"`).
+Because they are different events, they are not deduplicated against each other.
 
 Meta CAPI and Google Ads Enhanced Conversions use `event_id` / `transaction_id` to deduplicate browser and server events automatically.

@@ -378,7 +378,7 @@ export const AdminSettings: React.FC = () => {
             <pre className="p-3 rounded-lg bg-[#1D2327] text-emerald-300 text-[10px] font-mono overflow-x-auto whitespace-pre-wrap">{generatedHeadSnippet}</pre>
             <div className="p-3 rounded-lg bg-[#EEF5F5] border border-[#D3E3E5] space-y-1">
               <div className="font-bold text-[#0E5E6F]">Full GA4 DataLayer Ready</div>
-              <p>Pushes <code>page_view</code>, <code>view_item_list</code>, <code>view_item</code>, <code>add_to_cart</code>, <code>remove_from_cart</code>, <code>view_cart</code>, <code>begin_checkout</code>, <code>add_shipping_info</code>, <code>add_payment_info</code>, and reload-guarded <code>purchase</code> with <code>event_id</code>.</p>
+              <p>Pushes <code>page_view</code>, <code>view_item_list</code>, <code>view_item</code>, <code>add_to_cart</code>, <code>remove_from_cart</code>, <code>view_cart</code>, <code>begin_checkout</code>, <code>add_shipping_info</code>, <code>add_payment_info</code>, and reload-guarded <code>place_order</code> (order placed; the confirmed <code>Purchase</code> is sent by the server webhook) with <code>event_id</code>.</p>
             </div>
           </div>
         </div>
