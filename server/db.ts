@@ -3,11 +3,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+// Vercel: the deployment filesystem is read-only, so the SQLite file lives in /tmp (ephemeral, demo only).
+const DATA_DIR = process.env.VERCEL ? '/tmp/shuddho/data' : path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 const DB_PATH = path.join(DATA_DIR, 'shuddho.db');
+export const DB_FILE_PATH = DB_PATH;
 export const db = new DatabaseSync(DB_PATH);
 
 // Enable WAL and foreign keys

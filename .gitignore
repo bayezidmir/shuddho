@@ -13,3 +13,5 @@ public/uploads/
 # AI Studio local artifacts / generated dev files
 .aistudio/
 dev-dist/
+server-dist/
+.vercel/

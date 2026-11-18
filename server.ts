@@ -3,7 +3,6 @@ import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createServer as createViteServer } from 'vite';
 import { z } from 'zod';
 import {
   db,
@@ -14,6 +13,7 @@ import {
   logAudit,
   encryptSecret,
   hashPassword,
+  DB_FILE_PATH,
 } from './server/db';
 import {
   authenticateStaffCredentials,
@@ -47,7 +47,9 @@ import { BD_DISTRICTS } from './src/lib/districts';
 initSchema();
 seedIfEmpty();
 
-const UPLOADS_DIR = path.resolve(process.cwd(), 'public/uploads');
+// On Vercel the deployment filesystem is read-only; only /tmp is writable (and it is ephemeral).
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const UPLOADS_DIR = IS_VERCEL ? '/tmp/shuddho/uploads' : path.resolve(process.cwd(), 'public/uploads');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -97,7 +99,7 @@ function getOrderCountsByStatus() {
   return map;
 }
 
-async function startServer() {
+export async function buildApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '10mb' }));
@@ -2228,8 +2230,8 @@ async function startServer() {
   app.get('/api/admin/system', requireStaff('settings.view'), (_req, res) => {
     const keys = db.prepare('SELECT id, name, key_prefix, scopes, active, last_used_at, created_at FROM api_keys').all();
     const webhookQueue = db.prepare(`SELECT status, COUNT(*) as count FROM webhook_deliveries GROUP BY status`).all();
-    const dbSizeBytes = fs.existsSync(path.resolve(process.cwd(), 'data/shuddho.db'))
-      ? fs.statSync(path.resolve(process.cwd(), 'data/shuddho.db')).size
+    const dbSizeBytes = fs.existsSync(DB_FILE_PATH)
+      ? fs.statSync(DB_FILE_PATH).size
       : 0;
     res.json({ apiKeys: keys, webhookQueue, dbSizeBytes, uptimeSec: Math.round(process.uptime()), nodeVersion: process.version });
   });
@@ -2248,7 +2250,7 @@ async function startServer() {
   });
 
   app.get('/api/admin/system/backup', requireStaff('settings.view'), (_req, res) => {
-    const dbPath = path.resolve(process.cwd(), 'data/shuddho.db');
+    const dbPath = DB_FILE_PATH;
     res.download(dbPath, `shuddho-backup-${new Date().toISOString().slice(0, 10)}.db`);
   });
 
@@ -2260,6 +2262,12 @@ async function startServer() {
     res.json({ ok: true });
   });
 
+  return app;
+}
+
+async function startServer() {
+  const app = await buildApp();
+
   // Background queue timer (webhook retries + sandbox courier sync)
   setInterval(() => {
     processRetryQueue().catch(() => {});
@@ -2268,6 +2276,7 @@ async function startServer() {
   // Vite middleware in development, static dist in production
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2287,7 +2296,10 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+// On Vercel the app is served by api/index.ts instead of listening on a port.
+if (!IS_VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
